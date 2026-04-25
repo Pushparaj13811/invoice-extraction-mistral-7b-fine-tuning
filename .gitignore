@@ -1,0 +1,33 @@
+# Data (only the top-level data directory)
+/data/
+*.jsonl
+*.csv
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Environment
+.env
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Training outputs
+outputs/
+checkpoints/
+wandb/
+
+# OS
+.DS_Store
+Thumbs.db
