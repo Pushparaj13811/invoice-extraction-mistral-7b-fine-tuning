@@ -8,7 +8,7 @@ from transformers import TrainingArguments
 from trl import SFTTrainer
 
 from src.training.config import TrainingConfig
-from src.training.lora_setup import load_model_and_tokenizer
+from src.training.lora_setup import load_model_and_tokenizer, _HAS_UNSLOTH
 from src.data.format import load_jsonl
 
 # Check if newer trl with SFTConfig is available
@@ -45,12 +45,12 @@ def build_training_args(config: TrainingConfig, output_dir: str) -> TrainingArgu
         load_best_model_at_end=True,
         metric_for_best_model="eval_loss",
         report_to="wandb",
-        fp16=True,
-        gradient_checkpointing=True,
+        fp16=not _HAS_UNSLOTH,  # Unsloth handles precision internally
+        bf16=_HAS_UNSLOTH,
+        gradient_checkpointing=not _HAS_UNSLOTH,  # Unsloth handles this via use_gradient_checkpointing="unsloth"
     )
 
     if _HAS_SFT_CONFIG:
-        # Try max_seq_length first (trl>=0.12), fall back to max_length (trl>=1.0)
         import inspect
         sft_params = inspect.signature(SFTConfig.__init__).parameters
         if "max_seq_length" in sft_params:
@@ -76,6 +76,7 @@ def train(
             "epochs": config.num_train_epochs,
             "batch_size": config.effective_batch_size,
             "learning_rate": config.learning_rate,
+            "unsloth": _HAS_UNSLOTH,
         },
     )
 
@@ -102,10 +103,8 @@ def train(
     )
 
     if _HAS_SFT_CONFIG:
-        # Newer trl: tokenizer goes as processing_class
         trainer_kwargs["processing_class"] = tokenizer
     else:
-        # Older trl: use tokenizer and max_seq_length directly
         trainer_kwargs["tokenizer"] = tokenizer
         trainer_kwargs["max_seq_length"] = config.max_seq_length
 
@@ -113,7 +112,8 @@ def train(
 
     trainer.train()
 
-    trainer.save_model(os.path.join(output_dir, "final_adapter"))
+    # Save adapter
+    model.save_pretrained(os.path.join(output_dir, "final_adapter"))
     tokenizer.save_pretrained(os.path.join(output_dir, "final_adapter"))
 
     wandb.finish()

@@ -1,13 +1,26 @@
 from __future__ import annotations
 
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
-from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
-
 from src.training.config import TrainingConfig
 
+# Try Unsloth first (2x less VRAM), fall back to standard HF
+try:
+    from unsloth import FastLanguageModel
+    _HAS_UNSLOTH = True
+except ImportError:
+    _HAS_UNSLOTH = False
 
-def build_bnb_config(config: TrainingConfig) -> BitsAndBytesConfig:
+if not _HAS_UNSLOTH:
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+    from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+
+
+def build_bnb_config(config: TrainingConfig):
+    """Build BitsAndBytesConfig (only used in non-Unsloth path)."""
+    if _HAS_UNSLOTH:
+        return None
+    import torch
+    from transformers import BitsAndBytesConfig
     compute_dtype = getattr(torch, config.bnb_4bit_compute_dtype)
     return BitsAndBytesConfig(
         load_in_4bit=config.load_in_4bit,
@@ -17,7 +30,11 @@ def build_bnb_config(config: TrainingConfig) -> BitsAndBytesConfig:
     )
 
 
-def build_lora_config(config: TrainingConfig) -> LoraConfig:
+def build_lora_config(config: TrainingConfig):
+    """Build LoraConfig (only used in non-Unsloth path)."""
+    if _HAS_UNSLOTH:
+        return None
+    from peft import LoraConfig
     return LoraConfig(
         r=config.lora_r,
         lora_alpha=config.lora_alpha,
@@ -29,6 +46,32 @@ def build_lora_config(config: TrainingConfig) -> LoraConfig:
 
 
 def load_model_and_tokenizer(config: TrainingConfig):
+    """Load model and tokenizer with LoRA adapters.
+
+    Uses Unsloth if available (2x less VRAM), otherwise standard HF + PEFT.
+    """
+    if _HAS_UNSLOTH:
+        model, tokenizer = FastLanguageModel.from_pretrained(
+            model_name=config.model_name,
+            max_seq_length=config.max_seq_length,
+            load_in_4bit=config.load_in_4bit,
+            dtype=None,
+        )
+
+        model = FastLanguageModel.get_peft_model(
+            model,
+            r=config.lora_r,
+            lora_alpha=config.lora_alpha,
+            lora_dropout=config.lora_dropout,
+            target_modules=config.target_modules,
+            bias="none",
+            use_gradient_checkpointing="unsloth",
+        )
+
+        model.print_trainable_parameters()
+        return model, tokenizer
+
+    # Standard HF path
     bnb_config = build_bnb_config(config)
 
     model = AutoModelForCausalLM.from_pretrained(
