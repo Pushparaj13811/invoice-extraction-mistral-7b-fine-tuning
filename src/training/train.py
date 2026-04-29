@@ -11,6 +11,13 @@ from src.training.config import TrainingConfig
 from src.training.lora_setup import load_model_and_tokenizer
 from src.data.format import load_jsonl
 
+# Check if newer trl with SFTConfig is available
+try:
+    from trl import SFTConfig
+    _HAS_SFT_CONFIG = True
+except ImportError:
+    _HAS_SFT_CONFIG = False
+
 
 def format_for_sft(example: dict) -> str:
     return (
@@ -21,7 +28,7 @@ def format_for_sft(example: dict) -> str:
 
 
 def build_training_args(config: TrainingConfig, output_dir: str) -> TrainingArguments:
-    return TrainingArguments(
+    base_kwargs = dict(
         output_dir=output_dir,
         num_train_epochs=config.num_train_epochs,
         per_device_train_batch_size=config.per_device_train_batch_size,
@@ -41,6 +48,17 @@ def build_training_args(config: TrainingConfig, output_dir: str) -> TrainingArgu
         fp16=True,
         gradient_checkpointing=True,
     )
+
+    if _HAS_SFT_CONFIG:
+        # Try max_seq_length first (trl>=0.12), fall back to max_length (trl>=1.0)
+        import inspect
+        sft_params = inspect.signature(SFTConfig.__init__).parameters
+        if "max_seq_length" in sft_params:
+            return SFTConfig(**base_kwargs, max_seq_length=config.max_seq_length)
+        elif "max_length" in sft_params:
+            return SFTConfig(**base_kwargs, max_length=config.max_seq_length)
+        return SFTConfig(**base_kwargs)
+    return TrainingArguments(**base_kwargs)
 
 
 def train(
@@ -64,22 +82,34 @@ def train(
     train_data = load_jsonl(train_path)
     eval_data = load_jsonl(eval_path)
 
-    train_dataset = Dataset.from_list(train_data)
-    eval_dataset = Dataset.from_list(eval_data)
+    # Pre-format into text strings for SFTTrainer
+    train_texts = [format_for_sft(ex) for ex in train_data]
+    eval_texts = [format_for_sft(ex) for ex in eval_data]
+
+    train_dataset = Dataset.from_dict({"text": train_texts})
+    eval_dataset = Dataset.from_dict({"text": eval_texts})
 
     model, tokenizer = load_model_and_tokenizer(config)
 
     training_args = build_training_args(config, output_dir)
 
-    trainer = SFTTrainer(
+    # Build SFTTrainer with version-appropriate args
+    trainer_kwargs = dict(
         model=model,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
-        formatting_func=lambda x: [format_for_sft(x)],
-        max_seq_length=config.max_seq_length,
-        tokenizer=tokenizer,
         args=training_args,
     )
+
+    if _HAS_SFT_CONFIG:
+        # Newer trl: tokenizer goes as processing_class
+        trainer_kwargs["processing_class"] = tokenizer
+    else:
+        # Older trl: use tokenizer and max_seq_length directly
+        trainer_kwargs["tokenizer"] = tokenizer
+        trainer_kwargs["max_seq_length"] = config.max_seq_length
+
+    trainer = SFTTrainer(**trainer_kwargs)
 
     trainer.train()
 
