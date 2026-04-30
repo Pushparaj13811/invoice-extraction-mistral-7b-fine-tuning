@@ -45,8 +45,8 @@ def build_training_args(config: TrainingConfig, output_dir: str) -> TrainingArgu
         load_best_model_at_end=True,
         metric_for_best_model="eval_loss",
         report_to="wandb",
-        fp16=False,
-        bf16=True,
+        fp16=True,
+        bf16=False,
         gradient_checkpointing=True,
     )
 

@@ -37,6 +37,7 @@ def load_model_and_tokenizer(config: TrainingConfig):
         quantization_config=bnb_config,
         device_map="auto",
         trust_remote_code=True,
+        torch_dtype=torch.float16,
     )
 
     tokenizer = AutoTokenizer.from_pretrained(
