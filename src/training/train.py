@@ -20,20 +20,37 @@ except ImportError:
     _HAS_SFT_CONFIG = False
 
 
-class NoScalerSFTTrainer(SFTTrainer):
-    """SFTTrainer that disables GradScaler to avoid bfloat16 gradient crash.
+class _NoOpScaler:
+    """A no-op replacement for GradScaler that does nothing.
 
     When using QLoRA with fp16=True, PyTorch's GradScaler encounters bfloat16
-    gradients from quantized layers and crashes. This trainer keeps fp16
-    autocast for speed but removes the GradScaler that causes the error.
+    gradients from quantized layers and crashes. This scaler replaces it,
+    keeping fp16 autocast for speed without gradient scaling.
     """
+
+    def unscale_(self, optimizer):
+        pass
+
+    def step(self, optimizer):
+        optimizer.step()
+
+    def update(self):
+        pass
+
+    def get_scale(self):
+        return 1.0
+
+    def is_enabled(self):
+        return False
+
+
+class NoScalerSFTTrainer(SFTTrainer):
+    """SFTTrainer with GradScaler replaced by a no-op to avoid bf16 crash."""
 
     def create_accelerator_and_postprocess(self):
         super().create_accelerator_and_postprocess()
-        # Disable GradScaler — it can't handle mixed bf16/fp16 gradients
-        # from quantized models. fp16 autocast still works without it.
         if hasattr(self.accelerator, "scaler") and self.accelerator.scaler is not None:
-            self.accelerator.scaler = None
+            self.accelerator.scaler = _NoOpScaler()
 
 
 def format_for_sft(example: dict) -> str:
