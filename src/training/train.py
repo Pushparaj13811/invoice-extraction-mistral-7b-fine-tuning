@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 
+import torch
 import wandb
 from datasets import Dataset
 from transformers import TrainingArguments
@@ -17,6 +18,22 @@ try:
     _HAS_SFT_CONFIG = True
 except ImportError:
     _HAS_SFT_CONFIG = False
+
+
+class NoScalerSFTTrainer(SFTTrainer):
+    """SFTTrainer that disables GradScaler to avoid bfloat16 gradient crash.
+
+    When using QLoRA with fp16=True, PyTorch's GradScaler encounters bfloat16
+    gradients from quantized layers and crashes. This trainer keeps fp16
+    autocast for speed but removes the GradScaler that causes the error.
+    """
+
+    def create_accelerator_and_postprocess(self):
+        super().create_accelerator_and_postprocess()
+        # Disable GradScaler — it can't handle mixed bf16/fp16 gradients
+        # from quantized models. fp16 autocast still works without it.
+        if hasattr(self.accelerator, "scaler") and self.accelerator.scaler is not None:
+            self.accelerator.scaler = None
 
 
 def format_for_sft(example: dict) -> str:
@@ -93,7 +110,7 @@ def train(
 
     training_args = build_training_args(config, output_dir)
 
-    # Build SFTTrainer with version-appropriate args
+    # Use NoScalerSFTTrainer to avoid GradScaler crash with quantized models
     trainer_kwargs = dict(
         model=model,
         train_dataset=train_dataset,
@@ -107,7 +124,7 @@ def train(
         trainer_kwargs["tokenizer"] = tokenizer
         trainer_kwargs["max_seq_length"] = config.max_seq_length
 
-    trainer = SFTTrainer(**trainer_kwargs)
+    trainer = NoScalerSFTTrainer(**trainer_kwargs)
 
     trainer.train()
 
