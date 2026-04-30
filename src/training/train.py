@@ -2,55 +2,13 @@ from __future__ import annotations
 
 import os
 
-import torch
 import wandb
 from datasets import Dataset
-from transformers import TrainingArguments
-from trl import SFTTrainer
+from trl import SFTTrainer, SFTConfig
 
 from src.training.config import TrainingConfig
-from src.training.lora_setup import load_model_and_tokenizer
+from src.training.lora_setup import load_model_and_tokenizer, build_lora_config
 from src.data.format import load_jsonl
-
-# Check if newer trl with SFTConfig is available
-try:
-    from trl import SFTConfig
-    _HAS_SFT_CONFIG = True
-except ImportError:
-    _HAS_SFT_CONFIG = False
-
-
-class _NoOpScaler:
-    """A no-op replacement for GradScaler that does nothing.
-
-    When using QLoRA with fp16=True, PyTorch's GradScaler encounters bfloat16
-    gradients from quantized layers and crashes. This scaler replaces it,
-    keeping fp16 autocast for speed without gradient scaling.
-    """
-
-    def unscale_(self, optimizer):
-        pass
-
-    def step(self, optimizer):
-        optimizer.step()
-
-    def update(self):
-        pass
-
-    def get_scale(self):
-        return 1.0
-
-    def is_enabled(self):
-        return False
-
-
-class NoScalerSFTTrainer(SFTTrainer):
-    """SFTTrainer with GradScaler replaced by a no-op to avoid bf16 crash."""
-
-    def create_accelerator_and_postprocess(self):
-        super().create_accelerator_and_postprocess()
-        if hasattr(self.accelerator, "scaler") and self.accelerator.scaler is not None:
-            self.accelerator.scaler = _NoOpScaler()
 
 
 def format_for_sft(example: dict) -> str:
@@ -61,8 +19,19 @@ def format_for_sft(example: dict) -> str:
     )
 
 
-def build_training_args(config: TrainingConfig, output_dir: str) -> TrainingArguments:
-    base_kwargs = dict(
+def build_training_args(config: TrainingConfig, output_dir: str) -> SFTConfig:
+    """Build SFTConfig for training.
+
+    Neither fp16 nor bf16 is enabled. This avoids the GradScaler crash
+    that occurs when bitsandbytes produces bfloat16 gradients from
+    Mistral's native bfloat16 non-quantized layers. The 4-bit quantized
+    layers still compute in float16 via bnb_4bit_compute_dtype, so we
+    get memory savings without needing PyTorch AMP.
+    """
+    import inspect
+    sft_params = inspect.signature(SFTConfig.__init__).parameters
+
+    kwargs = dict(
         output_dir=output_dir,
         num_train_epochs=config.num_train_epochs,
         per_device_train_batch_size=config.per_device_train_batch_size,
@@ -78,21 +47,17 @@ def build_training_args(config: TrainingConfig, output_dir: str) -> TrainingArgu
         save_total_limit=3,
         load_best_model_at_end=True,
         metric_for_best_model="eval_loss",
-        report_to="wandb",
-        fp16=True,
-        bf16=False,
         gradient_checkpointing=True,
+        report_to="wandb",
     )
 
-    if _HAS_SFT_CONFIG:
-        import inspect
-        sft_params = inspect.signature(SFTConfig.__init__).parameters
-        if "max_seq_length" in sft_params:
-            return SFTConfig(**base_kwargs, max_seq_length=config.max_seq_length)
-        elif "max_length" in sft_params:
-            return SFTConfig(**base_kwargs, max_length=config.max_seq_length)
-        return SFTConfig(**base_kwargs)
-    return TrainingArguments(**base_kwargs)
+    # Handle max_seq_length vs max_length across trl versions
+    if "max_seq_length" in sft_params:
+        kwargs["max_seq_length"] = config.max_seq_length
+    elif "max_length" in sft_params:
+        kwargs["max_length"] = config.max_seq_length
+
+    return SFTConfig(**kwargs)
 
 
 def train(
@@ -116,7 +81,6 @@ def train(
     train_data = load_jsonl(train_path)
     eval_data = load_jsonl(eval_path)
 
-    # Pre-format into text strings for SFTTrainer
     train_texts = [format_for_sft(ex) for ex in train_data]
     eval_texts = [format_for_sft(ex) for ex in eval_data]
 
@@ -124,28 +88,22 @@ def train(
     eval_dataset = Dataset.from_dict({"text": eval_texts})
 
     model, tokenizer = load_model_and_tokenizer(config)
+    peft_config = build_lora_config(config)
 
     training_args = build_training_args(config, output_dir)
 
-    # Use NoScalerSFTTrainer to avoid GradScaler crash with quantized models
-    trainer_kwargs = dict(
+    # Pass peft_config to SFTTrainer — it handles PEFT wrapping internally
+    trainer = SFTTrainer(
         model=model,
+        args=training_args,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
-        args=training_args,
+        peft_config=peft_config,
+        processing_class=tokenizer,
     )
-
-    if _HAS_SFT_CONFIG:
-        trainer_kwargs["processing_class"] = tokenizer
-    else:
-        trainer_kwargs["tokenizer"] = tokenizer
-        trainer_kwargs["max_seq_length"] = config.max_seq_length
-
-    trainer = NoScalerSFTTrainer(**trainer_kwargs)
 
     trainer.train()
 
-    # Save adapter
     trainer.save_model(os.path.join(output_dir, "final_adapter"))
     tokenizer.save_pretrained(os.path.join(output_dir, "final_adapter"))
 

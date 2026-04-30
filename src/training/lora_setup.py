@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
-from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+from peft import LoraConfig
 
 from src.training.config import TrainingConfig
 
 
 def build_bnb_config(config: TrainingConfig) -> BitsAndBytesConfig:
+    """Build 4-bit quantization config.
+
+    bnb_4bit_compute_dtype controls the precision used during forward pass
+    for quantized layers. float16 is optimal for T4 GPUs.
+    """
     compute_dtype = getattr(torch, config.bnb_4bit_compute_dtype)
     return BitsAndBytesConfig(
         load_in_4bit=config.load_in_4bit,
@@ -18,6 +23,7 @@ def build_bnb_config(config: TrainingConfig) -> BitsAndBytesConfig:
 
 
 def build_lora_config(config: TrainingConfig) -> LoraConfig:
+    """Build LoRA adapter config."""
     return LoraConfig(
         r=config.lora_r,
         lora_alpha=config.lora_alpha,
@@ -28,29 +34,13 @@ def build_lora_config(config: TrainingConfig) -> LoraConfig:
     )
 
 
-def _cast_all_to_fp16(model):
-    """Cast all non-quantized parameters and buffers from bfloat16 to float16.
-
-    Mistral's config.json declares torch_dtype="bfloat16", which causes
-    non-quantized layers (embeddings, norms, lm_head) to load in bfloat16.
-    fp16 training uses GradScaler which crashes on bfloat16 gradients.
-    This function ensures zero bfloat16 tensors remain in the model.
-    """
-    count = 0
-    for name, param in model.named_parameters():
-        if param.dtype == torch.bfloat16:
-            param.data = param.data.to(torch.float16)
-            count += 1
-    for name, buf in model.named_buffers():
-        if buf.dtype == torch.bfloat16:
-            buf.data = buf.data.to(torch.float16)
-            count += 1
-    print(f"Cast {count} bfloat16 tensors to float16")
-    return model
-
-
 def load_model_and_tokenizer(config: TrainingConfig):
-    """Load quantized model and tokenizer, apply LoRA adapters."""
+    """Load 4-bit quantized model and tokenizer.
+
+    Note: LoRA adapters are NOT applied here. When using SFTTrainer,
+    pass peft_config directly to the trainer — it handles PEFT wrapping
+    internally, which is the recommended approach.
+    """
     bnb_config = build_bnb_config(config)
 
     model = AutoModelForCausalLM.from_pretrained(
@@ -58,7 +48,6 @@ def load_model_and_tokenizer(config: TrainingConfig):
         quantization_config=bnb_config,
         device_map="auto",
         trust_remote_code=True,
-        dtype=torch.float16,
     )
 
     tokenizer = AutoTokenizer.from_pretrained(
@@ -68,16 +57,5 @@ def load_model_and_tokenizer(config: TrainingConfig):
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
         model.config.pad_token_id = tokenizer.eos_token_id
-
-    model = prepare_model_for_kbit_training(model)
-
-    lora_config = build_lora_config(config)
-    model = get_peft_model(model, lora_config)
-
-    # Critical: cast ALL remaining bfloat16 params/buffers to float16
-    # This prevents GradScaler crash with bfloat16 gradients
-    model = _cast_all_to_fp16(model)
-
-    model.print_trainable_parameters()
 
     return model, tokenizer
