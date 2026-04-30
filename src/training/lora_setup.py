@@ -28,16 +28,29 @@ def build_lora_config(config: TrainingConfig) -> LoraConfig:
     )
 
 
-def load_model_and_tokenizer(config: TrainingConfig):
-    """Load quantized model and tokenizer, apply LoRA adapters.
+def _cast_all_to_fp16(model):
+    """Cast all non-quantized parameters and buffers from bfloat16 to float16.
 
     Mistral's config.json declares torch_dtype="bfloat16", which causes
     non-quantized layers (embeddings, norms, lm_head) to load in bfloat16.
-    When training with fp16=True, PyTorch's GradScaler crashes on bfloat16
-    gradients. We fix this by:
-    1. Loading with dtype=torch.float16 to override config.json
-    2. Casting any remaining bfloat16 parameters after PEFT wrapping
+    fp16 training uses GradScaler which crashes on bfloat16 gradients.
+    This function ensures zero bfloat16 tensors remain in the model.
     """
+    count = 0
+    for name, param in model.named_parameters():
+        if param.dtype == torch.bfloat16:
+            param.data = param.data.to(torch.float16)
+            count += 1
+    for name, buf in model.named_buffers():
+        if buf.dtype == torch.bfloat16:
+            buf.data = buf.data.to(torch.float16)
+            count += 1
+    print(f"Cast {count} bfloat16 tensors to float16")
+    return model
+
+
+def load_model_and_tokenizer(config: TrainingConfig):
+    """Load quantized model and tokenizer, apply LoRA adapters."""
     bnb_config = build_bnb_config(config)
 
     model = AutoModelForCausalLM.from_pretrained(
@@ -61,12 +74,9 @@ def load_model_and_tokenizer(config: TrainingConfig):
     lora_config = build_lora_config(config)
     model = get_peft_model(model, lora_config)
 
-    # Cast any remaining bfloat16 parameters to float16.
-    # Some non-quantized layers (embeddings, norms) may retain bfloat16
-    # from Mistral's config.json despite dtype=float16 at load time.
-    for param in model.parameters():
-        if param.dtype == torch.bfloat16:
-            param.data = param.data.to(torch.float16)
+    # Critical: cast ALL remaining bfloat16 params/buffers to float16
+    # This prevents GradScaler crash with bfloat16 gradients
+    model = _cast_all_to_fp16(model)
 
     model.print_trainable_parameters()
 
