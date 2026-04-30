@@ -29,7 +29,15 @@ def build_lora_config(config: TrainingConfig) -> LoraConfig:
 
 
 def load_model_and_tokenizer(config: TrainingConfig):
-    """Load quantized model and tokenizer, apply LoRA adapters."""
+    """Load quantized model and tokenizer, apply LoRA adapters.
+
+    Mistral's config.json declares torch_dtype="bfloat16", which causes
+    non-quantized layers (embeddings, norms, lm_head) to load in bfloat16.
+    When training with fp16=True, PyTorch's GradScaler crashes on bfloat16
+    gradients. We fix this by:
+    1. Loading with dtype=torch.float16 to override config.json
+    2. Casting any remaining bfloat16 parameters after PEFT wrapping
+    """
     bnb_config = build_bnb_config(config)
 
     model = AutoModelForCausalLM.from_pretrained(
@@ -37,7 +45,7 @@ def load_model_and_tokenizer(config: TrainingConfig):
         quantization_config=bnb_config,
         device_map="auto",
         trust_remote_code=True,
-        torch_dtype=torch.float16,
+        dtype=torch.float16,
     )
 
     tokenizer = AutoTokenizer.from_pretrained(
@@ -52,6 +60,13 @@ def load_model_and_tokenizer(config: TrainingConfig):
 
     lora_config = build_lora_config(config)
     model = get_peft_model(model, lora_config)
+
+    # Cast any remaining bfloat16 parameters to float16.
+    # Some non-quantized layers (embeddings, norms) may retain bfloat16
+    # from Mistral's config.json despite dtype=float16 at load time.
+    for param in model.parameters():
+        if param.dtype == torch.bfloat16:
+            param.data = param.data.to(torch.float16)
 
     model.print_trainable_parameters()
 
