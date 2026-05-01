@@ -1,7 +1,8 @@
-# Data (only the top-level data directory)
+# Secrets
+.env
+
+# Data (too large for git)
 /data/
-*.jsonl
-*.csv
 
 # Python
 __pycache__/
@@ -11,8 +12,7 @@ dist/
 build/
 .eggs/
 
-# Environment
-.env
+# Virtual environments
 .venv/
 venv/
 
@@ -31,3 +31,9 @@ wandb/
 # OS
 .DS_Store
 Thumbs.db
+
+# Claude
+.claude/
+
+# Pytest
+.pytest_cache/
