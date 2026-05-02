@@ -10,7 +10,6 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from src.data.schema import Invoice
 from src.data.format import load_jsonl
 from src.evaluation.metrics import compute_invoice_metrics
-from src.training.train import format_for_sft
 
 
 def load_finetuned_model(base_model: str, adapter_path: str):
@@ -30,25 +29,51 @@ def load_finetuned_model(base_model: str, adapter_path: str):
     tokenizer = AutoTokenizer.from_pretrained(base_model)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.padding_side = "left"
 
     return model, tokenizer
+
+
+def _parse_response(text: str) -> Invoice | None:
+    """Parse model output text into Invoice, handling markdown fences."""
+    text = text.strip()
+    if text.startswith("```"):
+        lines = text.split("\n")[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines)
+    try:
+        data = json.loads(text)
+        return Invoice.model_validate(data)
+    except Exception:
+        return None
 
 
 def run_finetuned_inference(
     model,
     tokenizer,
     eval_data: list[dict],
-    max_new_tokens: int = 512,
+    max_new_tokens: int = 256,
+    batch_size: int = 4,
 ) -> list[Invoice | None]:
+    """Batched inference for speed."""
     predictions = []
 
-    for i, example in enumerate(eval_data):
-        prompt = (
-            f"### Instruction:\n{example['instruction']}\n\n"
-            f"### Input:\n{example['input']}\n\n"
+    for i in range(0, len(eval_data), batch_size):
+        batch = eval_data[i:i + batch_size]
+        prompts = [
+            f"### Instruction:\n{ex['instruction']}\n\n"
+            f"### Input:\n{ex['input']}\n\n"
             f"### Response:\n"
-        )
-        inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+            for ex in batch
+        ]
+
+        inputs = tokenizer(
+            prompts,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+        ).to(model.device)
 
         with torch.no_grad():
             outputs = model.generate(
@@ -58,24 +83,20 @@ def run_finetuned_inference(
                 pad_token_id=tokenizer.eos_token_id,
             )
 
-        response = tokenizer.decode(outputs[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True)
+        decoded = tokenizer.batch_decode(outputs, skip_special_tokens=True)
 
-        text = response.strip()
-        if text.startswith("```"):
-            lines = text.split("\n")
-            lines = lines[1:]
-            if lines and lines[-1].strip() == "```":
-                lines = lines[:-1]
-            text = "\n".join(lines)
+        for prompt, full_output in zip(prompts, decoded):
+            marker = "### Response:\n"
+            idx = full_output.find(marker)
+            if idx >= 0:
+                response = full_output[idx + len(marker):].strip()
+            else:
+                response = full_output[len(prompt):].strip()
+            predictions.append(_parse_response(response))
 
-        try:
-            data = json.loads(text)
-            predictions.append(Invoice.model_validate(data))
-        except Exception:
-            predictions.append(None)
-
-        if (i + 1) % 50 == 0:
-            print(f"Inference progress: {i + 1}/{len(eval_data)}")
+        done = min(i + batch_size, len(eval_data))
+        if done % 50 == 0 or done == len(eval_data):
+            print(f"Inference progress: {done}/{len(eval_data)}")
 
     return predictions
 
@@ -121,7 +142,7 @@ def aggregate_metrics(
 
 def generate_report(ft_metrics: dict, baseline_metrics: dict) -> str:
     lines = [
-        "# Invoice Extraction \u2014 Evaluation Report\n",
+        "# Invoice Extraction — Evaluation Report\n",
         "## Overall Results\n",
         "| Metric | Fine-Tuned Mistral 7B | GPT-4o-mini Baseline | Improvement |",
         "|--------|----------------------|---------------------|-------------|",
@@ -137,7 +158,7 @@ def generate_report(ft_metrics: dict, baseline_metrics: dict) -> str:
     ft_parse = ft_metrics["json_parse_success_rate"]
     bl_parse = baseline_metrics["json_parse_success_rate"]
     lines.append(
-        f"| JSON Parse Rate | {ft_parse:.1%} | {bl_parse:.1%} | \u2014 |"
+        f"| JSON Parse Rate | {ft_parse:.1%} | {bl_parse:.1%} | — |"
     )
 
     ft_li = ft_metrics.get("line_item_score", 0)

@@ -7,8 +7,8 @@ from dataclasses import dataclass, field
 @dataclass
 class TrainingConfig:
     model_name: str = "mistralai/Mistral-7B-v0.3"
-    lora_r: int = 64
-    lora_alpha: int = 128
+    lora_r: int = 32
+    lora_alpha: int = 64
     lora_dropout: float = 0.05
     target_modules: list[str] = field(
         default_factory=lambda: [
@@ -20,17 +20,17 @@ class TrainingConfig:
     bnb_4bit_quant_type: str = "nf4"
     bnb_4bit_use_double_quant: bool = True
     bnb_4bit_compute_dtype: str = "float16"
-    num_train_epochs: int = 3
-    per_device_train_batch_size: int = 4
-    gradient_accumulation_steps: int = 4
-    learning_rate: float = 2e-4
+    num_train_epochs: int = 1
+    per_device_train_batch_size: int = 2
+    gradient_accumulation_steps: int = 8
+    learning_rate: float = 1e-4
     lr_scheduler_type: str = "cosine"
-    warmup_steps: int = 50
-    max_seq_length: int = 2048
+    warmup_steps: int = 20
+    max_seq_length: int = 768
     optim: str = "paged_adamw_8bit"
-    save_steps: int = 200
-    logging_steps: int = 10
-    eval_steps: int = 100
+    save_steps: int = 30
+    logging_steps: int = 5
+    eval_steps: int = 30
     wandb_project: str = "invoice-extraction-finetune"
 
     @property
