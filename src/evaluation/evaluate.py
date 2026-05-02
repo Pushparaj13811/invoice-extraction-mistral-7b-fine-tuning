@@ -38,7 +38,7 @@ def run_finetuned_inference(
     model,
     tokenizer,
     eval_data: list[dict],
-    max_new_tokens: int = 1024,
+    max_new_tokens: int = 512,
 ) -> list[Invoice | None]:
     predictions = []
 
@@ -55,7 +55,6 @@ def run_finetuned_inference(
                 **inputs,
                 max_new_tokens=max_new_tokens,
                 do_sample=False,
-                temperature=1.0,
                 pad_token_id=tokenizer.eos_token_id,
             )
 
