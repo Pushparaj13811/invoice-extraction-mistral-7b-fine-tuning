@@ -42,6 +42,30 @@ Fine-tuned **Mistral 7B** on invoice field extraction using **QLoRA** (4-bit qua
 - **Compute:** Kaggle T4 GPU (15GB VRAM)
 - **Experiment tracking:** [W&B Dashboard](https://wandb.ai/pushparajmehta002-rk-university/invoice-extraction-finetune)
 
+### Training Curves
+
+![Training Overview](assets/training_overview.png)
+
+<details>
+<summary>Individual Charts</summary>
+
+**Training & Evaluation Loss**
+![Training Loss](assets/training_loss.png)
+
+**Mean Token Accuracy**
+![Token Accuracy](assets/token_accuracy.png)
+
+**Learning Rate Schedule (Cosine)**
+![Learning Rate](assets/learning_rate.png)
+
+**Training Entropy**
+![Training Entropy](assets/training_entropy.png)
+
+**Gradient Norm**
+![Gradient Norm](assets/gradient_norm.png)
+
+</details>
+
 ## Dataset
 
 Built from three sources:
