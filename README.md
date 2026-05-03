@@ -42,27 +42,59 @@ Fine-tuned **Mistral 7B** on invoice field extraction using **QLoRA** (4-bit qua
 - **Compute:** Kaggle T4 GPU (15GB VRAM)
 - **Experiment tracking:** [W&B Dashboard](https://wandb.ai/pushparajmehta002-rk-university/invoice-extraction-finetune)
 
-### Training Curves
+### Training Curves (Steps 0-120, before collapse)
 
-![Training Overview](assets/training_overview.png)
+![Training Overview](assets/00_training_overview.png)
 
 <details>
-<summary>Individual Charts</summary>
+<summary>Training Metrics</summary>
 
 **Training & Evaluation Loss**
-![Training Loss](assets/training_loss.png)
+![Training Loss](assets/01_training_loss.png)
 
 **Mean Token Accuracy**
-![Token Accuracy](assets/token_accuracy.png)
+![Token Accuracy](assets/02_token_accuracy.png)
+
+**Training & Evaluation Entropy**
+![Entropy](assets/03_entropy.png)
 
 **Learning Rate Schedule (Cosine)**
-![Learning Rate](assets/learning_rate.png)
-
-**Training Entropy**
-![Training Entropy](assets/training_entropy.png)
+![Learning Rate](assets/04_learning_rate.png)
 
 **Gradient Norm**
-![Gradient Norm](assets/gradient_norm.png)
+![Gradient Norm](assets/05_gradient_norm.png)
+
+**Epoch Progress**
+![Epoch](assets/06_epoch.png)
+
+**Tokens Processed**
+![Tokens](assets/07_num_tokens.png)
+
+</details>
+
+<details>
+<summary>System Metrics</summary>
+
+**GPU Utilization**
+![GPU Utilization](assets/08_gpu_utilization.png)
+
+**GPU Memory Allocation**
+![GPU Memory](assets/09_gpu_memory.png)
+
+**GPU Temperature**
+![GPU Temperature](assets/10_gpu_temperature.png)
+
+**GPU Power Consumption**
+![GPU Power](assets/11_gpu_power.png)
+
+**CPU & System Memory**
+![CPU Memory](assets/12_cpu_memory.png)
+
+**Network I/O**
+![Network](assets/13_network_io.png)
+
+**Disk I/O**
+![Disk](assets/14_disk_io.png)
 
 </details>
 
