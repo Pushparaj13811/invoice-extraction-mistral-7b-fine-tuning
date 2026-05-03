@@ -1,31 +1,36 @@
 # LLM Fine-Tuning: Invoice Data Extraction
 
-Fine-tuned **Mistral 7B** on invoice field extraction using **QLoRA** (4-bit quantization + LoRA adapters), benchmarked against **GPT-4o-mini** baseline. Achieved **+182% improvement** in overall field extraction accuracy.
+Fine-tuned **Mistral 7B** on invoice field extraction using **QLoRA** (4-bit quantization + LoRA adapters), benchmarked against **GPT-4o-mini** baseline. Achieved **+77.8% improvement** in overall field extraction accuracy on a 296-sample eval set.
 
-## Results (10-sample eval, full 296-sample evaluation pending)
+## Results (296-sample evaluation)
 
 | Metric | Fine-Tuned Mistral 7B | GPT-4o-mini Baseline | Improvement |
 |--------|----------------------|---------------------|-------------|
-| Overall Accuracy | 87.2% | 30.9% | +182% |
-| JSON Parse Rate | 100.0% | 40.0% | +150% |
-| Line Item Score | 89.2% | 100.0% | — |
+| Overall Accuracy | 86.4% | 48.6% | +77.8% |
+| JSON Parse Rate | 97.3% | 58.8% | +65.5% |
+| Line Item Score | 86.0% | 99.5% | -13.6% |
 
 ### Per-Field Accuracy
 
 | Field | Fine-Tuned | GPT-4o-mini | Improvement |
 |-------|-----------|-------------|-------------|
-| invoice_date | 100.0% | 0.0% | — |
-| currency | 100.0% | 100.0% | 0% |
-| tax_amount | 100.0% | 100.0% | 0% |
-| invoice_number | 90.0% | 100.0% | -10% |
-| due_date | 90.0% | 0.0% | — |
-| total_amount | 90.0% | 100.0% | -10% |
-| discount | 90.0% | 75.0% | +20% |
-| payment_terms | 80.0% | 100.0% | -20% |
-| billing_address | 70.0% | 75.0% | -7% |
-| vendor_name | 60.0% | 100.0% | -40% |
+| due_date | 96.2% | 33.9% | +183.7% |
+| invoice_date | 90.6% | 32.2% | +181.6% |
+| discount | 97.9% | 98.9% | -0.9% |
+| tax_amount | 96.9% | 100.0% | -3.1% |
+| currency | 96.5% | 77.6% | +24.4% |
+| total_amount | 95.1% | 100.0% | -4.9% |
+| vendor_name | 86.1% | 100.0% | -13.9% |
+| payment_terms | 80.2% | 85.1% | -5.7% |
+| invoice_number | 78.5% | 100.0% | -21.5% |
+| billing_address | 73.3% | 82.8% | -11.5% |
 
-**Key takeaway:** The fine-tuned model's biggest advantage is **100% JSON parse rate** vs GPT-4o-mini's 40% — every output is valid, structured JSON matching the exact schema. GPT-4o-mini often returns malformed JSON, extra text, or wrong format despite having the schema in its system prompt.
+**Key takeaways:**
+- **+77.8% overall accuracy** — fine-tuned model significantly outperforms zero-shot GPT-4o-mini
+- **97.3% JSON parse rate** vs GPT-4o-mini's 58.8% — nearly every output is valid, structured JSON
+- **Biggest gains on dates:** +183.7% on due_date, +181.6% on invoice_date — the model learned the exact YYYY-MM-DD format from training
+- **+24.4% on currency** — model correctly identifies currency from context
+- GPT-4o-mini is stronger on some fields (vendor_name, invoice_number) when it successfully parses, but its 58.8% parse rate means 41% of outputs are unusable
 
 ## Training Details
 
