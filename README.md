@@ -73,7 +73,9 @@ Fine-tuned **Mistral 7B** on invoice field extraction using **QLoRA** (4-bit qua
 </details>
 
 <details>
-<summary>System Metrics</summary>
+<summary>System Metrics (Kaggle T4 x2)</summary>
+
+![System Overview](assets/15_system_overview.png)
 
 **GPU Utilization**
 ![GPU Utilization](assets/08_gpu_utilization.png)
